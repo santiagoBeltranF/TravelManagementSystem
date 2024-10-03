@@ -1,0 +1,168 @@
+version: '3'
+
+volumes:
+  keycloak_data:
+
+services:
+
+  db-reservations:
+    container_name: db-reservations
+    image: postgres:15.2
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pg_reservations
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 1234
+    ports:
+      - "8781:5432"
+
+  db-hosting:
+    container_name: db-hosting
+    image: postgres:15.2
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pg_hosting
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 1234
+    ports:
+      - "8782:5432"
+
+  db-airline:
+    container_name: db-airline
+    image: postgres:15.2
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pg_airline
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 1234
+    ports:
+      - "8783:5432"
+
+  db-user:
+    container_name: db-user
+    image: postgres:15.2
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pg_user
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 1234
+    ports:
+      - "8784:5432"
+
+  eureka-service:
+    container_name: eureka_service
+    build: ./eureka-service
+    restart: always
+    ports:
+      - "8761:8761"
+
+  airline-service:
+    container_name: airline_service
+    build: ./airline-service
+    restart: always
+    environment:
+      DATABASE_URL: jdbc:postgresql://db-airline:5432/pg_airline
+      DATABASE_USERNAME: root
+      DATABASE_PASSWORD: 1234
+      eureka.client.service-url.defaultZone: http://eureka-service:8761/eureka
+      spring.rabbitmq.host: rabbitmq
+    depends_on:
+      - db-airline
+      - eureka-service
+      - rabbitmq
+
+  hosting-service:
+    container_name: hosting_service
+    build: ./hosting-service
+    restart: always
+    environment:
+      DATABASE_URL: jdbc:postgresql://db-hosting:5432/pg_hosting
+      DATABASE_USERNAME: root
+      DATABASE_PASSWORD: 1234
+      eureka.client.service-url.defaultZone: http://eureka-service:8761/eureka
+      spring.rabbitmq.host: rabbitmq
+    depends_on:
+      - db-hosting
+      - eureka-service
+      - rabbitmq
+
+  reservation-service:
+    container_name: reservation_service
+    build: ./reservation-service
+    restart: always
+    environment:
+      DATABASE_URL: jdbc:postgresql://db-reservations:5432/pg_reservations
+      DATABASE_USERNAME: root
+      DATABASE_PASSWORD: 1234
+      eureka.client.service-url.defaultZone: http://eureka-service:8761/eureka
+    depends_on:
+      - db-reservations
+      - eureka-service
+
+  user-service:
+    container_name: user_service
+    build: ./user-service
+    restart: always
+    environment:
+      DATABASE_URL: jdbc:postgresql://db-user:5432/pg_user
+      DATABASE_USERNAME: root
+      DATABASE_PASSWORD: 1234
+      eureka.client.service-url.defaultZone: http://eureka-service:8761/eureka
+    depends_on:
+      - db-user
+      - eureka-service
+
+  gateway-service:
+    build: ./gateway-service
+    restart: always
+    ports:
+      - "8780:8780"
+    environment:
+      eureka.client.service-url.defaultZone: http://eureka-service:8761/eureka
+    depends_on:
+      - airline-service
+      - hosting-service
+      - reservation-service
+      - user-service
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:21.0.2
+    ports:
+      - "9090:9090"
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    volumes:
+      - keycloak_data:/opt/keycloak/data/
+    command: [ "start-dev", "--http-port=9090" ]
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: always
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  authentication-service:
+    image: authentication_service
+    build: ./authentication-service
+    restart: always
+    depends_on:
+      - eureka-service
+      - keycloak
+      - gateway-service
+    ports:
+      - "9095:9095"
+    environment:
+      eureka.client.service-url.defaultZone: http://eureka-service:8761/eureka
+      spring.security.oauth2.resourceserver.jwt.issuer-uri: http://keycloak:9090/realms/tutorial-api
+      spring.security.oauth2.resourceserver.jwt.jwk-set-uri: http://keycloak:9090/realms/tutorial-api/protocol/openid-connect/certs
+    links:
+      - eureka-service
+
+
+
